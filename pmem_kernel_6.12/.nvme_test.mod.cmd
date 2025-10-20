@@ -1,0 +1,1 @@
+savedcmd_/fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.mod := printf '%s\n'   main.o cxl_func.o | awk '!x[$$0]++ { print("/fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/"$$0) }' > /fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.mod

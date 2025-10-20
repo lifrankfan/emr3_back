@@ -1,0 +1,1 @@
+savedcmd_/fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T scripts/module.lds -o /fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.ko /fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.o /fast-lab-share/yangz15/emr3_back/pmem_kernel_6.12/nvme_test.mod.o
