@@ -52,6 +52,9 @@ void read_m5(void);
 int launch_cxl_io (unsigned long long head_low, unsigned long long head_high, unsigned long long payload);
 int launch_cxl_cache_read (unsigned long long page_address);
 int launch_cxl_cache_write (unsigned long long page_address, unsigned long long buffer_address, unsigned long long iter);
+int run_l2_and_dump(phys_addr_t base_addr, phys_addr_t query_addr, u64 num_vecs, u32 dim, u32 clk_mhz);
+long read_file_into_buffer(const char *path, void *buffer, size_t buffer_size);
+int launch_l2_dist_cal(phys_addr_t base_addr, phys_addr_t query_addr);
 
 //loopback test
 void set_loopback(unsigned long long addr, unsigned long long test_case, unsigned long long delay_cnt);
