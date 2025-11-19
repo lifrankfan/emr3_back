@@ -78,42 +78,62 @@ static void free_contig(struct page *pg, size_t bytes)
 }
 
 // ---------- One-batch CSR launch ----------
-static int l2_launch_batch(phys_addr_t base_pa, phys_addr_t query_pa,
-                           u64 num_vecs, u32 dim_cfg, u64 *cycles_out)
+static int l2_launch_batch(phys_addr_t base_pa,
+                           phys_addr_t query_pa,
+                           u64         num_vecs,
+                           u32         dim_cfg,
+                           u64        *cycles_out)
 {
-    volatile unsigned long long *csr = get_virt_addr();  // maps BAR1 CSR region
+    volatile unsigned long long *csr = get_virt_addr();
 
-    volatile unsigned long long *REG_PAGE_ADDR0  = csr + (0x0008 >> 3);
-    volatile unsigned long long *REG_PAGE_ADDR1  = csr + (0x0010 >> 3);
-    volatile unsigned long long *REG_DELAY       = csr + (0x0018 >> 3);
-    volatile unsigned long long *REG_TEST_CASE   = csr + (0x0020 >> 3);
-    volatile unsigned long long *REG_RESP        = csr + (0x0028 >> 3);
-    volatile unsigned long long *REG_NUM_REQ     = csr + (0x0060 >> 3);
-    volatile unsigned long long *REG_ADDR_RANGE  = csr + (0x0068 >> 3);
-    volatile unsigned long long *REG_L2_START    = csr + (0x0070 >> 3);
+    volatile u64 *REG_PAGE_ADDR0  = (u64 *)(csr + (0x0008 >> 3));
+    volatile u64 *REG_PAGE_ADDR1  = (u64 *)(csr + (0x0010 >> 3));
+    volatile u64 *REG_DELAY       = (u64 *)(csr + (0x0018 >> 3));
+    volatile u64 *REG_TEST_CASE   = (u64 *)(csr + (0x0020 >> 3));
+    volatile u64 *REG_RESP        = (u64 *)(csr + (0x0028 >> 3));
+    volatile u64 *REG_NUM_REQ     = (u64 *)(csr + (0x0060 >> 3));
+    volatile u64 *REG_ADDR_RANGE  = (u64 *)(csr + (0x0068 >> 3));
+    volatile u64 *REG_L2_START    = (u64 *)(csr + (0x0070 >> 3));
 
-    *REG_PAGE_ADDR0 = base_pa;
-    *REG_PAGE_ADDR1 = query_pa;
-    *REG_NUM_REQ    = num_vecs;
-    *REG_ADDR_RANGE = dim_cfg;
-    *REG_TEST_CASE  = 100ull;
-    asm volatile("mfence");
+    const int max_tries = 1000000;
+    int       tries;
 
-    *REG_L2_START   = 1ull;
-    asm volatile("mfence");
+    /* Program batch parameters */
+    *REG_PAGE_ADDR0 = base_pa;      /* base vectors physical address */
+    *REG_PAGE_ADDR1 = query_pa;     /* query vector physical address */
+    *REG_NUM_REQ    = num_vecs;     /* number of vectors in this batch */
+    *REG_ADDR_RANGE = dim_cfg;      /* dimension, e.g., 128 */
+    mfence();
 
-    {
-        int tries = 0, max_tries = 1000000;
-        while (tries++ < max_tries) {
-            if ((*REG_RESP) & 0x1ull) break;
-            usleep_range(500, 700);
-        }
-        if (tries >= max_tries) return -ETIMEDOUT;
+    *REG_TEST_CASE = 100ull;
+    mfence();
+
+    *REG_L2_START = 0ull;
+    mfence();
+
+    *REG_L2_START = 1ull; // set start
+    mfence();
+
+    for (tries = 0; tries < max_tries; ++tries) { // poll for done
+        u64 resp = *REG_RESP;
+
+        if (resp & 0x1ull)
+            break;
+
+        usleep_range(500, 700);
     }
 
-    *cycles_out = *REG_DELAY;  // muxed to l2_cycles in wrapper for test_case==100
+    if (tries == max_tries)
+        return -ETIMEDOUT;
+
+    *cycles_out = *REG_DELAY; // read cycles from hardware reg
+
+    *REG_L2_START = 0ull; // clear start
+    mfence();
+
     return 0;
 }
+
 
 // ---------- Public API ----------
 int run_l2_streaming_from_file(const char *base_path,
