@@ -11,6 +11,7 @@
 #include <linux/version.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <asm/barrier.h>
 
 #include "cxl_func.h"
 #include "l2_stream.h"
@@ -51,7 +52,7 @@ static long read_exact_simple(const char *path, void *dst, size_t want, loff_t *
 }
 
 // ---------- Physically contiguous allocator ----------
-static int alloc_contig(size_t bytes, struct page **out_pg, phys_addr_t *out_pa, void **out_va)
+static int alloc_contig(size_t bytes, int nid, struct page **out_pg, phys_addr_t *out_pa, void **out_va)
 {
     unsigned int order;
     struct page *pg;
@@ -60,7 +61,11 @@ static int alloc_contig(size_t bytes, struct page **out_pg, phys_addr_t *out_pa,
     if (!bytes || (bytes & (PAGE_SIZE - 1))) return -EINVAL;
     order = get_order(bytes);
 
-    pg = alloc_pages(GFP_KERNEL | __GFP_NOWARN, order);
+    if (nid == NUMA_NO_NODE)
+        pg = alloc_pages(GFP_KERNEL | __GFP_NOWARN, order);
+    else
+        pg = alloc_pages_node(nid, GFP_KERNEL | __GFP_NOWARN, order);
+
     if (!pg) return -ENOMEM;
 
     va = page_address(pg);
@@ -78,7 +83,7 @@ static void free_contig(struct page *pg, size_t bytes)
 }
 
 // ---------- One-batch CSR launch ----------
-static int l2_launch_batch(phys_addr_t base_pa,
+static int l2_launch_batch(phys_addr_t device_base_pa,
                            phys_addr_t query_pa,
                            u64         num_vecs,
                            u32         dim_cfg,
@@ -99,20 +104,20 @@ static int l2_launch_batch(phys_addr_t base_pa,
     int       tries;
 
     /* Program batch parameters */
-    *REG_PAGE_ADDR0 = base_pa;      /* base vectors physical address */
+    *REG_PAGE_ADDR0 = device_base_pa;      /* base vectors physical address */
     *REG_PAGE_ADDR1 = query_pa;     /* query vector physical address */
     *REG_NUM_REQ    = num_vecs;     /* number of vectors in this batch */
     *REG_ADDR_RANGE = dim_cfg;      /* dimension, e.g., 128 */
-    mfence();
+    mb();
 
     *REG_TEST_CASE = 100ull;
-    mfence();
+    mb();
 
     *REG_L2_START = 0ull;
-    mfence();
+    mb();
 
     *REG_L2_START = 1ull; // set start
-    mfence();
+    mb();
 
     for (tries = 0; tries < max_tries; ++tries) { // poll for done
         u64 resp = *REG_RESP;
@@ -126,27 +131,36 @@ static int l2_launch_batch(phys_addr_t base_pa,
     if (tries == max_tries)
         return -ETIMEDOUT;
 
-    *cycles_out = *REG_DELAY; // read cycles from hardware reg
+    // Read cycles and result
+    *cycles_out = *REG_DELAY; 
+    u64 resp_val = *REG_RESP;
+    u64 l2_res = resp_val >> 1; // Upper 63 bits hold the result
+    
+    // Print the last result for verification
+    pr_info("l2_stream: Batch done. Cycles=%llu, Last L2 Result=%llu\n", 
+            (unsigned long long)*cycles_out, (unsigned long long)l2_res);
 
     *REG_L2_START = 0ull; // clear start
-    mfence();
+    mb();
 
     return 0;
 }
 
 
 // ---------- Public API ----------
+// ---------- Public API ----------
 int run_l2_streaming_from_file(const char *base_path,
                                const char *query_path,
                                u64 total_vecs, u32 dim,
-                               u64 batch_vecs, u32 clk_mhz)
+                               u64 batch_vecs, u32 clk_mhz,
+                               int cxl_nid, u64 cxl_base)
 {
     const size_t BYTES_PER_VEC = 512;     // 128 * 4B
     const size_t QUERY_BYTES   = BYTES_PER_VEC;
 
     struct page *query_page = NULL, *base_pages = NULL;
     void *query_va = NULL, *base_va = NULL;
-    phys_addr_t query_pa = 0, base_pa = 0;
+    phys_addr_t query_pa = 0, cpu_base_pa = 0;
 
     // Allocate a page for the query (512B fits)
     query_page = alloc_page(GFP_KERNEL);
@@ -168,9 +182,20 @@ int run_l2_streaming_from_file(const char *base_path,
         if (batch_bytes & (PAGE_SIZE - 1))
             batch_bytes = (batch_bytes + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
-        if (alloc_contig(batch_bytes, &base_pages, &base_pa, &base_va)) {
+        if (alloc_contig(batch_bytes, cxl_nid, &base_pages, &cpu_base_pa, &base_va)) {
             __free_page(query_page);
             return -ENOMEM;
+        }
+
+        // Calculate Device Physical Address (DPA) if using CXL memory
+        phys_addr_t device_pa = cpu_base_pa;
+        if (cxl_nid != NUMA_NO_NODE && cxl_base != 0) {
+            if (cpu_base_pa >= cxl_base) {
+                device_pa = cpu_base_pa - cxl_base;
+            } else {
+                pr_warn("l2_stream: Allocated address %llx < cxl_base %llx, using raw PA\n",
+                        (unsigned long long)cpu_base_pa, (unsigned long long)cxl_base);
+            }
         }
 
         // Stream the base file
@@ -193,7 +218,8 @@ int run_l2_streaming_from_file(const char *base_path,
 
                 {
                     u64 cyc = 0;
-                    int rc = l2_launch_batch(base_pa, query_pa, this_vecs, dim, &cyc);
+                    // Use device_pa for the FPGA
+                    int rc = l2_launch_batch(device_pa, query_pa, this_vecs, dim, &cyc);
                     if (rc) {
                         pr_err("l2_stream: batch failed at pass %llu (rc=%d)\n", pass, rc);
                         free_contig(base_pages, batch_bytes);

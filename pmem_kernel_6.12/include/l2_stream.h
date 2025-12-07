@@ -8,4 +8,5 @@
 int run_l2_streaming_from_file(const char *base_path,
                                const char *query_path,
                                u64 total_vecs, u32 dim,
-                               u64 batch_vecs, u32 clk_mhz);
+                               u64 batch_vecs, u32 clk_mhz,
+                               int cxl_nid, u64 cxl_base);
