@@ -41,7 +41,7 @@ void alloc_and_get_phys(struct page **out_page, phys_addr_t *out_phys)
 
 void *get_virt_addr(void)
 {
-    void *virt_addr = ioremap(FPGA_BAR_1_ADDRESS, 0x1000);
+    void *virt_addr = ioremap_wc(FPGA_BAR_1_ADDRESS, 0x1000);
     return (unsigned long long *)virt_addr;
 }
 
@@ -551,7 +551,7 @@ int run_l2_and_dump(phys_addr_t base_addr, phys_addr_t query_addr, u64 num_vecs,
     char outbuf[256];
     long wret;
     u64 cycles;
-    const char *out_path = "/home/lifan3/cxl_dist_cal/data/l2_result.txt";
+    const char *out_path = "/fast-lab-share/lifan3/emr3_back/pmem_kernel_6.12/data/l2_result.txt";
 
     if (!csr) {
         pr_err("CSR ioremap failed\n");
