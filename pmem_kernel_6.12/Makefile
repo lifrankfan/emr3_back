@@ -1,8 +1,8 @@
 # Output module
-obj-m := nvme_test.o
+obj-m := nvme_test_v3.o
 
 # Objects that form the module
-nvme_test-objs := \
+nvme_test_v3-objs := \
   src/main.o \
   src/cxl_func.o \
   src/l2_stream.o

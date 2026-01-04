@@ -41,7 +41,7 @@ void alloc_and_get_phys(struct page **out_page, phys_addr_t *out_phys)
 
 void *get_virt_addr(void)
 {
-    void *virt_addr = ioremap_wc(FPGA_BAR_1_ADDRESS, 0x1000);
+    void *virt_addr = ioremap(FPGA_BAR_1_ADDRESS, 0x1000);
     return (unsigned long long *)virt_addr;
 }
 

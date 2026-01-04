@@ -78,7 +78,7 @@ static int __init my_module_init(void)
     
     // NOTE: Blocking in _init is bad practice but common in simple test modules.
     
-    ret = run_l2_streaming_from_file(base_path, query_path, 
+    ret = run_l2_streaming_from_file_v3(base_path, query_path, 
                                      total_vecs, 128, 
                                      4096 /* batch_vecs (2MB) to avoid ENOMEM */, axi_clk_mhz, 
                                      cxl_nid, cxl_base);
